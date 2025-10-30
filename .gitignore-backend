@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Environment variables (NEVER commit these)
+.env
+.env.local
+.env.production
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Frontend files (hosted separately at akitamia.dog)
+website.html
+airdrop.html
+config.js
+src/
+
+# Test files (not needed in production)
+test-*.html
+airdrop-old.html
+
+# Database files (Render creates these)
+*.sql
+setup-postgres.sh
+
+# Development files
+vite.config.js
+dist/
+.vite/
+
+# IDE
+.vscode/
+.idea/
