@@ -261,6 +261,20 @@ app.post('/api/save-claim', async (req, res) => {
         const signedClaim = req.body;
         
         console.log('🔍 Validating claim submission...');
+        console.log('Signature type:', typeof signedClaim.signature);
+        console.log('Signature value:', signedClaim.signature);
+        
+        // Normalize signature if it's an object
+        if (typeof signedClaim.signature === 'object' && signedClaim.signature !== null) {
+            if (signedClaim.signature.signature) {
+                signedClaim.signature = signedClaim.signature.signature;
+            } else if (signedClaim.signature.result) {
+                signedClaim.signature = signedClaim.signature.result;
+            } else {
+                signedClaim.signature = JSON.stringify(signedClaim.signature);
+            }
+            console.log('Normalized signature:', signedClaim.signature);
+        }
         
         // STEP 1: Validate claim structure
         const structureCheck = validateClaimStructure(signedClaim);
@@ -302,8 +316,8 @@ app.post('/api/save-claim', async (req, res) => {
             });
         }
         
-        // STEP 5: Validate all wallet addresses and re-verify via Hiro API
-        console.log('🔍 Re-verifying wallet ownership via Hiro API...');
+        // STEP 5: Validate all wallet addresses and re-verify via Unisat API
+        console.log('🔍 Re-verifying wallet ownership via Unisat API...');
         let totalVerifiedAkitamia = 0;
         
         for (const wallet of signedClaim.data.wallets) {
@@ -317,7 +331,7 @@ app.post('/api/save-claim', async (req, res) => {
                 });
             }
             
-            // Re-verify ownership via Hiro API
+            // Re-verify ownership via Unisat API
             const actualCount = await verifyWalletAkitamia(wallet.address);
             
             if (actualCount === null) {
@@ -368,7 +382,7 @@ app.post('/api/save-claim', async (req, res) => {
             signedClaim.wallet_type,
             signedClaim.signed_by_wallet,
             signedClaim.signed_at,
-            signedClaim.signature
+            JSON.stringify({ signature: signedClaim.signature, wallet: signedClaim.wallet_type })
         ]);
         
         // 8. Insert wallets
@@ -462,7 +476,10 @@ app.get('/api/claims', async (req, res) => {
     }
 });
 
-// Function to verify wallet Akitamia count using Hiro API
+// Unisat API Configuration from environment variables
+const UNISAT_API_KEY = process.env.UNISAT_API_KEY || '8f76d71880e3fee030d3acf55ccf9cb476e721e24b47abc22b465f8daf02ca82';
+
+// Function to verify wallet Akitamia count using Unisat API
 async function verifyWalletAkitamia(btcAddress) {
     const INSCRIPTION_RANGE = {
         min: 105831003,
@@ -470,9 +487,16 @@ async function verifyWalletAkitamia(btcAddress) {
     };
     
     return new Promise((resolve) => {
-        const url = `https://api.hiro.so/ordinals/v1/inscriptions?address=${btcAddress}&limit=60`;
+        const url = `https://open-api.unisat.io/v1/indexer/address/${btcAddress}/inscription-data?cursor=0&size=100`;
         
-        https.get(url, (response) => {
+        const options = {
+            headers: {
+                'Authorization': `Bearer ${UNISAT_API_KEY}`,
+                'Content-Type': 'application/json'
+            }
+        };
+        
+        https.get(url, options, (response) => {
             let data = '';
             
             response.on('data', (chunk) => {
@@ -482,16 +506,23 @@ async function verifyWalletAkitamia(btcAddress) {
             response.on('end', () => {
                 try {
                     if (response.statusCode !== 200) {
-                        console.error(`Hiro API error for ${btcAddress}: ${response.statusCode}`);
+                        console.error(`Unisat API error for ${btcAddress}: ${response.statusCode}`);
                         resolve(null);
                         return;
                     }
                     
                     const jsonData = JSON.parse(data);
                     
-                    if (jsonData.results && jsonData.results.length > 0) {
-                        const akitamiaInscriptions = jsonData.results.filter(inscription => {
-                            const num = inscription.number;
+                    // Check Unisat API response format
+                    if (jsonData.code !== 0) {
+                        console.error(`Unisat API returned error code ${jsonData.code}: ${jsonData.msg}`);
+                        resolve(null);
+                        return;
+                    }
+                    
+                    if (jsonData.data && jsonData.data.inscription && jsonData.data.inscription.length > 0) {
+                        const akitamiaInscriptions = jsonData.data.inscription.filter(ins => {
+                            const num = ins.inscriptionNumber;
                             return num >= INSCRIPTION_RANGE.min && num <= INSCRIPTION_RANGE.max;
                         });
                         resolve(akitamiaInscriptions.length);
@@ -499,7 +530,7 @@ async function verifyWalletAkitamia(btcAddress) {
                         resolve(0);
                     }
                 } catch (error) {
-                    console.error(`Error parsing response for ${btcAddress}:`, error.message);
+                    console.error(`Error parsing Unisat response for ${btcAddress}:`, error.message);
                     resolve(null);
                 }
             });
@@ -601,7 +632,7 @@ app.get('/api/claims/spark/:address', async (req, res) => {
         
         const claim = result.rows[0];
         
-        // Verify and update wallet counts using Hiro API
+        // Verify and update wallet counts using Unisat API
         console.log(`🔍 Verifying Akitamia counts for Spark address: ${sparkAddress}`);
         const verificationResult = await verifyAndUpdateClaim(claim.claim_id, claim.wallets);
         
@@ -697,7 +728,7 @@ app.get('/api/v1/public/claim/:sparkAddress', async (req, res) => {
         
         const claim = result.rows[0];
         
-        // Verify and update wallet counts using Hiro API
+        // Verify and update wallet counts using Unisat API
         console.log(`🔍 Verifying Akitamia counts for public API request: ${sparkAddress}`);
         const verificationResult = await verifyAndUpdateClaim(claim.claim_id, claim.wallets);
         
