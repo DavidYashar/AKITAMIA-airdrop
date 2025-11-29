@@ -371,9 +371,59 @@ app.post('/api/save-claim', async (req, res) => {
             });
         }
         
-        console.log('✅ All validations passed. Saving to database...');
+        console.log('✅ All validations passed. Checking for database conflicts...');
         
         await client.query('BEGIN');
+        
+        // STEP 7: Database-level duplicate checks (within transaction)
+        // Check if spark address already exists
+        const dbSparkCheck = await client.query(
+            'SELECT id, spark_address FROM claims WHERE spark_address = $1',
+            [signedClaim.data.spark_address]
+        );
+        
+        if (dbSparkCheck.rows.length > 0) {
+            await client.query('ROLLBACK');
+            console.error(`❌ Spark address already used: ${signedClaim.data.spark_address}`);
+            return res.status(400).json({ 
+                success: false, 
+                message: 'This Spark address has already been used to claim.'
+            });
+        }
+        
+        // Check if signing wallet already exists
+        const dbSignerCheck = await client.query(
+            'SELECT id, signed_by_wallet FROM claims WHERE signed_by_wallet = $1',
+            [signedClaim.signed_by_wallet]
+        );
+        
+        if (dbSignerCheck.rows.length > 0) {
+            await client.query('ROLLBACK');
+            console.error(`❌ Signing wallet already used: ${signedClaim.signed_by_wallet}`);
+            return res.status(400).json({ 
+                success: false, 
+                message: 'This wallet has already been used to sign another claim.'
+            });
+        }
+        
+        // Check if any of the wallets already exist in database
+        for (const wallet of signedClaim.data.wallets) {
+            const dbWalletCheck = await client.query(
+                'SELECT claim_id, btc_address FROM wallets WHERE btc_address = $1',
+                [wallet.address]
+            );
+            
+            if (dbWalletCheck.rows.length > 0) {
+                await client.query('ROLLBACK');
+                console.error(`❌ Wallet already used in another claim: ${wallet.address}`);
+                return res.status(400).json({ 
+                    success: false, 
+                    message: `Wallet ${wallet.address.slice(0, 10)}... has already been used in another claim.`
+                });
+            }
+        }
+        
+        console.log('✅ No database conflicts found. Saving to database...');
         
         // 7. Insert into claims table
         await client.query(`
