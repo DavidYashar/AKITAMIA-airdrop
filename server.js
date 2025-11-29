@@ -245,6 +245,13 @@ function validateClaimStructure(signedClaim) {
         return { valid: false, error: 'Signed by wallet address is required' };
     }
     
+    // Check for duplicate wallet addresses within the same claim
+    const walletAddresses = signedClaim.data.wallets.map(w => w.address);
+    const uniqueAddresses = new Set(walletAddresses);
+    if (walletAddresses.length !== uniqueAddresses.size) {
+        return { valid: false, error: 'Duplicate wallet addresses detected in the same claim' };
+    }
+    
     // Validate total_akitamia matches sum of wallet counts
     const calculatedTotal = signedClaim.data.wallets.reduce((sum, w) => sum + (w.akitamia_count || 0), 0);
     if (signedClaim.data.total_akitamia !== calculatedTotal) {
