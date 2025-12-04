@@ -542,59 +542,84 @@ async function verifyWalletAkitamia(btcAddress) {
         min: 105831003,
         max: 105841545
     };
+    const MAX_INSCRIPTIONS = 1000;  // Limit to prevent excessive API calls
     
     return new Promise((resolve) => {
-        const url = `https://open-api.unisat.io/v1/indexer/address/${btcAddress}/inscription-data?cursor=0&size=100`;
+        let allInscriptions = [];
+        let cursor = 0;
         
-        const options = {
-            headers: {
-                'Authorization': `Bearer ${UNISAT_API_KEY}`,
-                'Content-Type': 'application/json'
-            }
-        };
-        
-        https.get(url, options, (response) => {
-            let data = '';
+        function fetchPage() {
+            const url = `https://open-api.unisat.io/v1/indexer/address/${btcAddress}/inscription-data?cursor=${cursor}&size=100`;
             
-            response.on('data', (chunk) => {
-                data += chunk;
-            });
-            
-            response.on('end', () => {
-                try {
-                    if (response.statusCode !== 200) {
-                        console.error(`Unisat API error for ${btcAddress}: ${response.statusCode}`);
-                        resolve(null);
-                        return;
-                    }
-                    
-                    const jsonData = JSON.parse(data);
-                    
-                    // Check Unisat API response format
-                    if (jsonData.code !== 0) {
-                        console.error(`Unisat API returned error code ${jsonData.code}: ${jsonData.msg}`);
-                        resolve(null);
-                        return;
-                    }
-                    
-                    if (jsonData.data && jsonData.data.inscription && jsonData.data.inscription.length > 0) {
-                        const akitamiaInscriptions = jsonData.data.inscription.filter(ins => {
-                            const num = ins.inscriptionNumber;
-                            return num >= INSCRIPTION_RANGE.min && num <= INSCRIPTION_RANGE.max;
-                        });
-                        resolve(akitamiaInscriptions.length);
-                    } else {
-                        resolve(0);
-                    }
-                } catch (error) {
-                    console.error(`Error parsing Unisat response for ${btcAddress}:`, error.message);
-                    resolve(null);
+            const options = {
+                headers: {
+                    'Authorization': `Bearer ${UNISAT_API_KEY}`,
+                    'Content-Type': 'application/json'
                 }
+            };
+            
+            https.get(url, options, (response) => {
+                let data = '';
+                
+                response.on('data', (chunk) => {
+                    data += chunk;
+                });
+                
+                response.on('end', () => {
+                    try {
+                        if (response.statusCode !== 200) {
+                            console.error(`Unisat API error for ${btcAddress}: ${response.statusCode}`);
+                            resolve(null);
+                            return;
+                        }
+                        
+                        const jsonData = JSON.parse(data);
+                        
+                        // Check Unisat API response format
+                        if (jsonData.code !== 0) {
+                            console.error(`Unisat API returned error code ${jsonData.code}: ${jsonData.msg}`);
+                            resolve(null);
+                            return;
+                        }
+                        
+                        if (jsonData.data && jsonData.data.inscription && jsonData.data.inscription.length > 0) {
+                            allInscriptions = allInscriptions.concat(jsonData.data.inscription);
+                            console.log(`Fetched ${jsonData.data.inscription.length} inscriptions for ${btcAddress}, total: ${allInscriptions.length}`);
+                            
+                            // Check if we should fetch more pages
+                            if (jsonData.data.inscription.length < 100 || allInscriptions.length >= MAX_INSCRIPTIONS) {
+                                // Last page or reached limit, count AKITAMIA
+                                const akitamiaInscriptions = allInscriptions.filter(ins => {
+                                    const num = ins.inscriptionNumber;
+                                    return num >= INSCRIPTION_RANGE.min && num <= INSCRIPTION_RANGE.max;
+                                });
+                                console.log(`Found ${akitamiaInscriptions.length} AKITAMIA inscriptions for ${btcAddress}`);
+                                resolve(akitamiaInscriptions.length);
+                            } else {
+                                // Fetch next page
+                                cursor += 100;
+                                fetchPage();
+                            }
+                        } else {
+                            // No inscriptions or end of data
+                            const akitamiaInscriptions = allInscriptions.filter(ins => {
+                                const num = ins.inscriptionNumber;
+                                return num >= INSCRIPTION_RANGE.min && num <= INSCRIPTION_RANGE.max;
+                            });
+                            resolve(akitamiaInscriptions.length);
+                        }
+                    } catch (error) {
+                        console.error(`Error parsing Unisat response for ${btcAddress}:`, error.message);
+                        resolve(null);
+                    }
+                });
+            }).on('error', (error) => {
+                console.error(`Error verifying wallet ${btcAddress}:`, error.message);
+                resolve(null);
             });
-        }).on('error', (error) => {
-            console.error(`Error verifying wallet ${btcAddress}:`, error.message);
-            resolve(null);
-        });
+        }
+        
+        fetchPage();  // Start fetching from first page
     });
 }
 
