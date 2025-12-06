@@ -29,6 +29,9 @@ const rateLimitMap = new Map();
 const RATE_LIMIT_WINDOW = parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 60 * 1000; // 1 hour in milliseconds
 const RATE_LIMIT_MAX_REQUESTS = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 10000; // Max requests per IP per hour
 
+// Airdrop deadline: Saturday, December 7, 2025 at 3:00 PM UTC
+const AIRDROP_DEADLINE = new Date('2025-12-07T15:00:00Z');
+
 function checkRateLimit(ip) {
     const now = Date.now();
     const userRequests = rateLimitMap.get(ip) || [];
@@ -372,6 +375,15 @@ app.post('/api/save-claim', async (req, res) => {
         }
         
         console.log('✅ All validations passed. Checking for database conflicts...');
+        
+        // Check if airdrop deadline has passed
+        if (new Date() > AIRDROP_DEADLINE) {
+            console.log(`❌ Airdrop deadline passed - Submission rejected`);
+            return res.status(403).json({ 
+                success: false, 
+                message: 'Airdrop has ended. Submissions are no longer accepted. Thank you for participating!'
+            });
+        }
         
         await client.query('BEGIN');
         
